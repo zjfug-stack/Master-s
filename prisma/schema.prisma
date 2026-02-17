@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PaidStatus {
+  pending
+  paid
+  void
+}
+
+enum LiveStatus {
+  active
+  mc
+  wd
+  dq
+  ns
+}
+
+model Pool {
+  id                    String             @id @default(cuid())
+  year                  Int                @unique
+  name                  String
+  lockAtCt              DateTime           @map("lock_at_ct")
+  entryFeeCents         Int                @map("entry_fee_cents")
+  venmoHandle           String             @map("venmo_handle")
+  mastersParentId       String?            @map("masters_parent_id")
+  mastersTournamentId   String?            @map("masters_tournament_id")
+  winnerFinalScoreToPar Int?               @map("winner_final_score_to_par")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  tiers                 Tier[]
+  entries               Entry[]
+  liveScores            LiveScore[]
+  leaderboardCache      LeaderboardCache[]
+
+  @@map("pools")
+}
+
+model Tier {
+  id         String      @id @default(cuid())
+  poolId     String      @map("pool_id")
+  pool       Pool        @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  tierNum    Int         @map("tier_num")
+  label      String?
+  tierGolfers TierGolfer[]
+
+  @@unique([poolId, tierNum])
+  @@map("tiers")
+}
+
+model Golfer {
+  id          String       @id @default(cuid())
+  apiPlayerId String       @unique @map("api_player_id")
+  firstName   String       @map("first_name")
+  lastName    String       @map("last_name")
+  displayName String       @map("display_name")
+  country     String?
+  tierGolfers TierGolfer[]
+  picks       Pick[]
+  liveScores  LiveScore[]
+
+  @@map("golfers")
+}
+
+model TierGolfer {
+  id       String @id @default(cuid())
+  tierId   String @map("tier_id")
+  golferId String @map("golfer_id")
+  tier     Tier   @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  golfer   Golfer @relation(fields: [golferId], references: [id], onDelete: Cascade)
+
+  @@unique([tierId, golferId])
+  @@map("tier_golfers")
+}
+
+model Entry {
+  id                  String             @id @default(cuid())
+  poolId              String             @map("pool_id")
+  pool                Pool               @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  purchaserName       String             @map("purchaser_name")
+  email               String
+  teamName            String             @map("team_name")
+  tiebreakWinnerScore Int                @map("tiebreak_winner_score")
+  paidStatus          PaidStatus         @default(pending) @map("paid_status")
+  paidAt              DateTime?          @map("paid_at")
+  isDead              Boolean            @default(false) @map("is_dead")
+  deadReason          String?            @map("dead_reason")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  picks               Pick[]
+  substitutions       Substitution[]
+  cache               LeaderboardCache?
+
+  @@map("entries")
+}
+
+model Pick {
+  id       String @id @default(cuid())
+  entryId  String @map("entry_id")
+  tierNum  Int    @map("tier_num")
+  golferId String @map("golfer_id")
+  entry    Entry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  golfer   Golfer @relation(fields: [golferId], references: [id])
+
+  @@unique([entryId, tierNum])
+  @@map("picks")
+}
+
+model Substitution {
+  id           String   @id @default(cuid())
+  entryId      String   @map("entry_id")
+  tierNum      Int      @map("tier_num")
+  fromGolferId String   @map("from_golfer_id")
+  toGolferId   String   @map("to_golfer_id")
+  reason       String
+  createdAt    DateTime @default(now()) @map("created_at")
+  entry        Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@map("substitutions")
+}
+
+model LiveScore {
+  id          String     @id @default(cuid())
+  poolId      String     @map("pool_id")
+  golferId    String     @map("golfer_id")
+  status      LiveStatus
+  toPar       Int?
+  roundToPar1 Int?       @map("round_to_par_1")
+  roundToPar2 Int?       @map("round_to_par_2")
+  roundToPar3 Int?       @map("round_to_par_3")
+  roundToPar4 Int?       @map("round_to_par_4")
+  thru        Int?
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  pool        Pool       @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  golfer      Golfer     @relation(fields: [golferId], references: [id], onDelete: Cascade)
+
+  @@unique([poolId, golferId])
+  @@map("live_scores")
+}
+
+model LeaderboardCache {
+  id         String   @id @default(cuid())
+  poolId     String   @map("pool_id")
+  entryId    String   @map("entry_id")
+  totalToPar Int      @map("total_to_par")
+  tier6ToPar Int      @map("tier6_to_par")
+  tier3ToPar Int      @map("tier3_to_par")
+  tier4ToPar Int      @map("tier4_to_par")
+  rank       Int?
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  pool       Pool     @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  entry      Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([poolId, entryId])
+  @@map("leaderboard_cache")
+}
