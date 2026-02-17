@@ -3,15 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 
 type Row = {
-  id: string;
   rank: number | null;
-  teamName: string;
-  totalToPar: number;
-  paidStatus: string;
-  isDead: boolean;
-  tiebreakWinnerScore: number;
-  updatedAt: string;
-  picks: Array<{ tierNum: number; golferName: string; toPar: number | null }>;
+  team_name: string;
+  purchaser_name: string;
+  paid_status: string;
+  is_dead: boolean;
+  total_to_par: number;
+  tier_picks: Array<{ tier_num: number; golfer_name: string; to_par: number | null; status: string }>;
+  tiebreak_winner_score: number;
 };
 
 export function LeaderboardTable({ initialRows }: { initialRows: Row[] }) {
@@ -32,19 +31,14 @@ export function LeaderboardTable({ initialRows }: { initialRows: Row[] }) {
   }, [refresh]);
 
   const filtered = useMemo(
-    () => rows.filter((row) => row.teamName.toLowerCase().includes(query.toLowerCase())),
+    () => rows.filter((row) => row.team_name.toLowerCase().includes(query.toLowerCase())),
     [rows, query]
   );
 
   return (
     <div className="space-y-4">
       <div className="flex gap-3">
-        <input
-          className="rounded bg-neutral-900 px-3 py-2"
-          placeholder="Search team"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <input className="rounded bg-neutral-900 px-3 py-2" placeholder="Search team" value={query} onChange={(e) => setQuery(e.target.value)} />
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={refresh} onChange={(e) => setRefresh(e.target.checked)} /> Auto refresh
         </label>
@@ -53,22 +47,21 @@ export function LeaderboardTable({ initialRows }: { initialRows: Row[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left">
-              <th>Rank</th><th>Team</th><th>Total</th><th>Picks</th><th>Badges</th><th>Tiebreak</th><th>Updated</th>
+              <th>Rank</th><th>Team</th><th>Total</th><th>Picks</th><th>Badges</th><th>Tiebreak</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((row) => (
-              <tr key={row.id} className="border-t border-neutral-800 align-top">
-                <td>{row.isDead ? 'DEAD' : row.rank}</td>
-                <td>{row.teamName}</td>
-                <td>{row.totalToPar > 0 ? `+${row.totalToPar}` : row.totalToPar}</td>
-                <td>{row.picks.map((p) => <div key={p.tierNum}>Tier {p.tierNum}: {p.golferName} ({p.toPar ?? '—'})</div>)}</td>
+            {filtered.map((row, idx) => (
+              <tr key={`${row.team_name}-${idx}`} className="border-t border-neutral-800 align-top">
+                <td>{row.is_dead ? 'DEAD' : row.rank}</td>
+                <td>{row.team_name}</td>
+                <td>{row.total_to_par > 0 ? `+${row.total_to_par}` : row.total_to_par}</td>
+                <td>{row.tier_picks.map((pick) => <div key={pick.tier_num}>Tier {pick.tier_num}: {pick.golfer_name} ({pick.to_par ?? '—'}, {pick.status})</div>)}</td>
                 <td className="space-x-2">
-                  {row.paidStatus === 'paid' && <span className="rounded bg-emerald-700 px-2 py-1">Paid</span>}
-                  {row.isDead && <span className="rounded bg-red-700 px-2 py-1">Dead</span>}
+                  {row.paid_status === 'paid' && <span className="rounded bg-emerald-700 px-2 py-1">Paid</span>}
+                  {row.is_dead && <span className="rounded bg-red-700 px-2 py-1">Dead</span>}
                 </td>
-                <td>{row.tiebreakWinnerScore}</td>
-                <td>{new Date(row.updatedAt).toLocaleTimeString()}</td>
+                <td>{row.tiebreak_winner_score}</td>
               </tr>
             ))}
           </tbody>
