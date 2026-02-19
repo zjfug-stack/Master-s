@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --masters-green: #006747;
+  --masters-yellow: #FFCD00;
+}
+
+body {
+  background-color: #f9fafb;
+  color: #111827;
+}

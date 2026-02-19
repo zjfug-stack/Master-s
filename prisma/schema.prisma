@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  entries   Entry[]
+}
+
+model Entry {
+  id        String   @id @default(cuid())
+  name      String   // e.g. "John's Team A"
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  picks     Pick[]
+  tiebreaker Int?    // predicted winning score (under par)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Golfer {
+  id          String  @id @default(cuid())
+  name        String
+  worldRank   Int?
+  // Sportradar player ID for server-side lookups
+  sportradarId String? @unique
+  picks        Pick[]
+}
+
+model Pick {
+  id        String   @id @default(cuid())
+  entryId   String
+  entry     Entry    @relation(fields: [entryId], references: [id])
+  golferId  String
+  golfer    Golfer   @relation(fields: [golferId], references: [id])
+  slot      Int      // 1-5: pick slot number
+  createdAt DateTime @default(now())
+
+  @@unique([entryId, slot])
+  @@unique([entryId, golferId])
+}
+
+// Cache for tournament scores fetched from Sportradar (server-side only)
+model TournamentCache {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  data        Json
+  fetchedAt   DateTime @default(now())
+  expiresAt   DateTime
+}
