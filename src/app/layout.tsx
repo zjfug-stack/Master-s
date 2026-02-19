@@ -22,8 +22,9 @@ export default function RootLayout({
             </div>
             <nav className="flex gap-6 text-sm font-medium">
               <a href="/" className="hover:text-[#FFCD00] transition-colors">Leaderboard</a>
-              <a href="/picks" className="hover:text-[#FFCD00] transition-colors">My Picks</a>
+              <a href="/enter" className="hover:text-[#FFCD00] transition-colors">Enter</a>
               <a href="/golfers" className="hover:text-[#FFCD00] transition-colors">Field</a>
+              <a href="/rules" className="hover:text-[#FFCD00] transition-colors">Rules</a>
             </nav>
           </div>
         </header>

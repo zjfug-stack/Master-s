@@ -1,8 +1,7 @@
 /**
  * GET /api/leaderboard
- * Returns the pool leaderboard. Serves from LeaderboardCache when fresh;
- * falls back to a live DB aggregation when stale.
- * All Sportradar data is pre-synced via POST /api/scores/sync — never fetched here.
+ * Returns pool standings. Serves from LeaderboardCache when fresh;
+ * recomputes when stale.
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -13,11 +12,12 @@ export const dynamic = "force-dynamic";
 interface LeaderboardEntry {
   rank: number;
   entryId: string;
-  entrantName: string;
-  entrantEmail: string;
+  teamName: string;
+  purchaserName: string;
   picks: Array<{ tierNumber: number; golferName: string; score: number | null; status: string }>;
   totalScore: number | null;
-  tiebreaker: number | null;
+  tiebreakerScore: number | null;
+  paidStatus: string;
 }
 
 async function buildLeaderboard(poolId: string): Promise<LeaderboardEntry[]> {
@@ -48,26 +48,22 @@ async function buildLeaderboard(poolId: string): Promise<LeaderboardEntry[]> {
         tierNumber: p.tier.tierNumber,
         golferName: p.golfer.name,
         score: ls?.totalScore ?? null,
-        status: ls?.status ?? "ACTIVE",
+        status: String(ls?.status ?? "ACTIVE"),
       };
     });
 
-    const validScores = picks
-      .map((p) => p.score)
-      .filter((s): s is number => s !== null);
-
-    const totalScore = validScores.length > 0
-      ? validScores.reduce((sum, s) => sum + s, 0)
-      : null;
+    const validScores = picks.map((p) => p.score).filter((s): s is number => s !== null);
+    const totalScore = validScores.length > 0 ? validScores.reduce((a, b) => a + b, 0) : null;
 
     return {
       rank: 0,
       entryId: entry.id,
-      entrantName: entry.entrantName,
-      entrantEmail: entry.entrantEmail,
+      teamName: entry.teamName,
+      purchaserName: entry.purchaserName,
       picks,
       totalScore,
-      tiebreaker: entry.tiebreaker,
+      tiebreakerScore: entry.tiebreakerScore,
+      paidStatus: entry.paidStatus,
     };
   });
 
@@ -77,7 +73,6 @@ async function buildLeaderboard(poolId: string): Promise<LeaderboardEntry[]> {
     if (b.totalScore === null) return -1;
     return a.totalScore - b.totalScore;
   });
-
   rows.forEach((r, i) => { r.rank = i + 1; });
   return rows;
 }
@@ -85,24 +80,13 @@ async function buildLeaderboard(poolId: string): Promise<LeaderboardEntry[]> {
 export async function GET() {
   try {
     const pool = await prisma.pool.findUnique({ where: { year: 2026 } });
-    if (!pool) {
-      return NextResponse.json({ error: "Pool not found" }, { status: 404 });
-    }
+    if (!pool) return NextResponse.json({ error: "Pool not found" }, { status: 404 });
 
-    // Serve from fresh cache if available
-    const cache = await prisma.leaderboardCache.findUnique({
-      where: { poolId: pool.id },
-    });
-
+    const cache = await prisma.leaderboardCache.findUnique({ where: { poolId: pool.id } });
     if (cache && cache.expiresAt > new Date()) {
-      return NextResponse.json({
-        entries: cache.data,
-        fromCache: true,
-        cachedAt: cache.fetchedAt,
-      });
+      return NextResponse.json({ entries: cache.data, fromCache: true, cachedAt: cache.fetchedAt });
     }
 
-    // Build and persist a fresh leaderboard (60-second TTL)
     const entries = await buildLeaderboard(pool.id);
     const expiresAt = new Date(Date.now() + 60_000);
     const jsonData = JSON.parse(JSON.stringify(entries)) as Prisma.InputJsonValue;

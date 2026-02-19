@@ -19,6 +19,11 @@ enum PoolStatus {
   COMPLETE
 }
 
+enum PaidStatus {
+  PENDING
+  PAID
+}
+
 enum GolferStatus {
   ACTIVE
   CUT
@@ -35,6 +40,10 @@ model Pool {
   year             Int               @unique
   name             String
   status           PoolStatus        @default(PENDING)
+  /// Submissions locked after this UTC instant (displayed in America/Chicago)
+  lockAtCt         DateTime?
+  venmoHandle      String?           // e.g. "MastersPool2026" (no @ prefix)
+  entryFeeUsd      Int               @default(20)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -94,16 +103,18 @@ model TierGolfer {
 
 // ─── Entries ──────────────────────────────────────────────────────────────────
 
-/// One entry per participant (they may submit multiple entries if the pool allows it).
+/// One entry per participant per pool.
 model Entry {
-  id            String   @id @default(cuid())
-  poolId        String
-  pool          Pool     @relation(fields: [poolId], references: [id])
-  entrantName   String
-  entrantEmail  String
-  tiebreaker    Int?     // predicted winning score under par (e.g. 18)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                  String     @id @default(cuid())
+  poolId              String
+  pool                Pool       @relation(fields: [poolId], references: [id])
+  purchaserName       String
+  email               String
+  teamName            String
+  tiebreakerScore     Int?       // predicted winning score under par (e.g. 18)
+  paidStatus          PaidStatus @default(PENDING)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
   picks         Pick[]
   substitutions Substitution[]
