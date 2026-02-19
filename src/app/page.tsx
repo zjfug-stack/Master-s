@@ -39,8 +39,8 @@ export default async function HomePage() {
     <div className="space-y-8">
       {/* Hero banner */}
       <section className="rounded-2xl bg-[#006747] text-white p-8 text-center shadow-lg">
-        <h1 className="text-4xl font-bold mb-2">2026 Masters Tournament</h1>
-        <p className="text-[#FFCD00] text-lg font-medium">Fantasy Pool Leaderboard</p>
+        <h1 className="text-4xl font-bold mb-2">Masters Pool 2026</h1>
+        <p className="text-[#FFCD00] text-lg font-medium">Masters Tournament Fantasy Pool Leaderboard</p>
         <p className="mt-3 text-green-100 text-sm">
           Augusta National Golf Club &bull; April 9–12, 2026
         </p>
