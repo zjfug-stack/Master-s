@@ -1,6 +1,6 @@
 /**
- * GET  /api/entries        — list all entries
- * POST /api/entries        — create a new entry with picks
+ * GET  /api/entries        — list all entries for the 2026 pool
+ * POST /api/entries        — create a new entry with tier picks
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -10,11 +10,14 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const entries = await prisma.entry.findMany({
+      where: { pool: { year: 2026 } },
       include: {
-        user: { select: { name: true, email: true } },
         picks: {
-          include: { golfer: { select: { name: true } } },
-          orderBy: { slot: "asc" },
+          include: {
+            golfer: { select: { name: true } },
+            tier: { select: { tierNumber: true, name: true } },
+          },
+          orderBy: { tier: { tierNumber: "asc" } },
         },
       },
       orderBy: { createdAt: "asc" },
@@ -27,54 +30,64 @@ export async function GET() {
   }
 }
 
+interface PickInput {
+  tierId: string;
+  golferId: string;
+}
+
 interface CreateEntryBody {
-  userName: string;
-  userEmail: string;
-  entryName: string;
-  // Array of 5 golfer IDs (from /api/golfers)
-  golferIds: string[];
+  entrantName: string;
+  entrantEmail: string;
   tiebreaker?: number;
+  // One pick per tier: [{tierId, golferId}, …] — must be exactly 6 (one per tier)
+  picks: PickInput[];
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as CreateEntryBody;
-    const { userName, userEmail, entryName, golferIds, tiebreaker } = body;
+    const { entrantName, entrantEmail, picks, tiebreaker } = body;
 
-    if (!userName || !userEmail || !entryName) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    if (!entrantName || !entrantEmail) {
+      return NextResponse.json({ error: "entrantName and entrantEmail are required" }, { status: 400 });
     }
-    if (!Array.isArray(golferIds) || golferIds.length !== 5) {
-      return NextResponse.json({ error: "Exactly 5 golfer picks are required" }, { status: 400 });
+    if (!Array.isArray(picks) || picks.length !== 6) {
+      return NextResponse.json({ error: "Exactly 6 picks are required (one per tier)" }, { status: 400 });
     }
-    if (new Set(golferIds).size !== 5) {
+
+    const tierIds = picks.map((p) => p.tierId);
+    const golferIds = picks.map((p) => p.golferId);
+
+    if (new Set(tierIds).size !== 6) {
+      return NextResponse.json({ error: "Each pick must be in a different tier" }, { status: 400 });
+    }
+    if (new Set(golferIds).size !== 6) {
       return NextResponse.json({ error: "Duplicate golfer picks are not allowed" }, { status: 400 });
     }
 
-    // Upsert user
-    const user = await prisma.user.upsert({
-      where: { email: userEmail },
-      update: { name: userName },
-      create: { name: userName, email: userEmail },
-    });
+    // Verify the pool exists
+    const pool = await prisma.pool.findUnique({ where: { year: 2026 } });
+    if (!pool) {
+      return NextResponse.json({ error: "Pool not found — run the seed script first" }, { status: 404 });
+    }
 
-    // Create entry with picks in a transaction
     const entry = await prisma.$transaction(async (tx) => {
       const newEntry = await tx.entry.create({
         data: {
-          name: entryName,
-          userId: user.id,
+          poolId: pool.id,
+          entrantName,
+          entrantEmail,
           tiebreaker: tiebreaker ?? null,
         },
       });
 
-      const picks = golferIds.map((golferId, idx) => ({
-        entryId: newEntry.id,
-        golferId,
-        slot: idx + 1,
-      }));
-
-      await tx.pick.createMany({ data: picks });
+      await tx.pick.createMany({
+        data: picks.map((p) => ({
+          entryId: newEntry.id,
+          tierId: p.tierId,
+          golferId: p.golferId,
+        })),
+      });
 
       return newEntry;
     });

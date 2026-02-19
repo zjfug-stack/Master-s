@@ -2,34 +2,75 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-interface EntryScore {
-  id: string;
-  name: string;
-  userName: string;
-  totalScore: number;
-  picks: string[];
+interface PickRow {
+  tierNumber: number;
+  golferName: string;
+  score: number | null;
 }
 
-async function getPoolLeaderboard(): Promise<EntryScore[]> {
-  const entries = await prisma.entry.findMany({
+interface EntryRow {
+  id: string;
+  entrantName: string;
+  picks: PickRow[];
+  totalScore: number | null;
+}
+
+async function getPoolLeaderboard(): Promise<EntryRow[]> {
+  const pool = await prisma.pool.findUnique({
+    where: { year: 2026 },
     include: {
-      user: true,
-      picks: {
-        include: { golfer: true },
-        orderBy: { slot: "asc" },
+      entries: {
+        include: {
+          picks: {
+            include: {
+              golfer: { select: { id: true, name: true } },
+              tier: { select: { tierNumber: true } },
+            },
+            orderBy: { tier: { tierNumber: "asc" } },
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      },
+      liveScores: {
+        select: { golferId: true, totalScore: true },
       },
     },
-    orderBy: { createdAt: "asc" },
   });
 
-  return entries.map((entry) => ({
-    id: entry.id,
-    name: entry.name,
-    userName: entry.user.name,
-    // Scoring will be filled in once the tournament starts and scores are cached
-    totalScore: 0,
-    picks: entry.picks.map((p) => p.golfer.name),
-  }));
+  if (!pool) return [];
+
+  const scoreMap = new Map(pool.liveScores.map((s) => [s.golferId, s.totalScore]));
+
+  const rows: EntryRow[] = pool.entries.map((entry) => {
+    const picks: PickRow[] = entry.picks.map((p) => ({
+      tierNumber: p.tier.tierNumber,
+      golferName: p.golfer.name,
+      score: scoreMap.get(p.golferId) ?? null,
+    }));
+
+    const validScores = picks
+      .map((p) => p.score)
+      .filter((s): s is number => s !== null);
+
+    const totalScore = validScores.length > 0
+      ? validScores.reduce((sum, s) => sum + s, 0)
+      : null;
+
+    return { id: entry.id, entrantName: entry.entrantName, picks, totalScore };
+  });
+
+  return rows.sort((a, b) => {
+    if (a.totalScore === null && b.totalScore === null) return 0;
+    if (a.totalScore === null) return 1;
+    if (b.totalScore === null) return -1;
+    return a.totalScore - b.totalScore;
+  });
+}
+
+function fmtScore(score: number | null): string {
+  if (score === null) return "—";
+  if (score === 0) return "E";
+  return score > 0 ? `+${score}` : String(score);
 }
 
 export default async function HomePage() {
@@ -61,9 +102,8 @@ export default async function HomePage() {
               <thead className="bg-[#006747] text-white">
                 <tr>
                   <th className="px-4 py-3 text-left w-12">Pos</th>
-                  <th className="px-4 py-3 text-left">Entry</th>
-                  <th className="px-4 py-3 text-left">Owner</th>
-                  <th className="px-4 py-3 text-left">Picks</th>
+                  <th className="px-4 py-3 text-left">Entrant</th>
+                  <th className="px-4 py-3 text-left">Picks (T1–T6)</th>
                   <th className="px-4 py-3 text-right">Score</th>
                 </tr>
               </thead>
@@ -74,15 +114,14 @@ export default async function HomePage() {
                     className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
                   >
                     <td className="px-4 py-3 font-semibold text-gray-600">{idx + 1}</td>
-                    <td className="px-4 py-3 font-medium">{entry.name}</td>
-                    <td className="px-4 py-3 text-gray-600">{entry.userName}</td>
+                    <td className="px-4 py-3 font-medium">{entry.entrantName}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {entry.picks.length > 0
-                        ? entry.picks.join(", ")
-                        : <span className="italic">No picks yet</span>}
+                        ? entry.picks.map((p) => `${p.golferName} (${fmtScore(p.score)})`).join(", ")
+                        : <span className="italic">No picks</span>}
                     </td>
                     <td className="px-4 py-3 text-right font-mono font-semibold">
-                      {entry.totalScore === 0 ? "E" : entry.totalScore > 0 ? `+${entry.totalScore}` : entry.totalScore}
+                      {fmtScore(entry.totalScore)}
                     </td>
                   </tr>
                 ))}
@@ -96,8 +135,8 @@ export default async function HomePage() {
       <section className="grid md:grid-cols-3 gap-6">
         {[
           {
-            title: "Make Your Picks",
-            desc: "Select 5 golfers from the Masters field. Your score is the sum of your best 4 scores.",
+            title: "Pick One Per Tier",
+            desc: "Choose one golfer from each of the 6 tiers. All 6 picks count toward your total.",
           },
           {
             title: "Live Scoring",
@@ -105,7 +144,7 @@ export default async function HomePage() {
           },
           {
             title: "Win the Pool",
-            desc: "Lowest combined score wins. Tiebreaker goes to the closest predicted winning score.",
+            desc: "Lowest combined score wins. Tiebreaker: closest predicted winning score.",
           },
         ].map((item) => (
           <div key={item.title} className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
