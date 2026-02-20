@@ -6,8 +6,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // POSTGRES_PRISMA_URL uses PgBouncer connection pooling — set by Vercel Postgres
+  url       = env("POSTGRES_PRISMA_URL")
+  // POSTGRES_URL_NON_POOLING is a direct connection used by prisma db push / migrate
+  directUrl = env("POSTGRES_URL_NON_POOLING")
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
