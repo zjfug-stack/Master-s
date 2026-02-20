@@ -36,16 +36,22 @@ enum GolferStatus {
 
 /// One row per tournament year (e.g. 2026).
 model Pool {
-  id               String            @id @default(cuid())
-  year             Int               @unique
-  name             String
-  status           PoolStatus        @default(PENDING)
+  id                    String            @id @default(cuid())
+  year                  Int               @unique
+  name                  String
+  status                PoolStatus        @default(PENDING)
   /// Submissions locked after this UTC instant (displayed in America/Chicago)
-  lockAtCt         DateTime?
-  venmoHandle      String?           // e.g. "MastersPool2026" (no @ prefix)
-  entryFeeUsd      Int               @default(20)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  lockAtCt              DateTime?
+  venmoHandle           String?           // e.g. "MastersPool2026" (no @ prefix)
+  entryFeeUsd           Int               @default(20)
+  /// Sportradar tournament ID resolved from schedule endpoint
+  mastersTournamentId   String?
+  /// Round after which MC golfers are frozen (typically 2)
+  cutRound              Int?
+  /// Winner's final score relative to par (null until tournament complete)
+  winnerFinalScoreToPar Int?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   tiers            Tier[]
   entries          Entry[]
@@ -113,6 +119,8 @@ model Entry {
   teamName            String
   tiebreakerScore     Int?       // predicted winning score under par (e.g. 18)
   paidStatus          PaidStatus @default(PENDING)
+  /// True if any pick has WD/DQ status — sorted to bottom of leaderboard
+  isDead              Boolean    @default(false)
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
@@ -166,6 +174,8 @@ model LiveScore {
   totalScore  Int          // strokes relative to par (negative = under par)
   thru        Int?         // holes completed in current round (null = not started)
   status      GolferStatus @default(ACTIVE)
+  /// Per-round scores [r1, r2, r3, r4] relative to par; null = not yet played
+  roundScores Json?
   updatedAt   DateTime     @updatedAt
 
   @@unique([golferId, poolId])
@@ -179,6 +189,5 @@ model LeaderboardCache {
   poolId    String   @unique
   pool      Pool     @relation(fields: [poolId], references: [id])
   data      Json
-  fetchedAt DateTime @default(now())
-  expiresAt DateTime
+  updatedAt DateTime @updatedAt
 }

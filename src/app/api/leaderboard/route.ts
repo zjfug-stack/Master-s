@@ -1,105 +1,92 @@
 /**
- * GET /api/leaderboard
- * Returns pool standings. Serves from LeaderboardCache when fresh;
- * recomputes when stale.
+ * GET /api/leaderboard?year=2026
+ *
+ * Returns:
+ *   {
+ *     server_time_iso: string,
+ *     last_updated_iso: string | null,
+ *     entries: LeaderboardRow[]
+ *   }
+ *
+ * Serves the pre-computed leaderboard_cache. When no cache exists (pre-tournament),
+ * falls back to building a list from DB entries with null scores.
+ * last_updated_iso is null in the fallback case.
  */
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-interface LeaderboardEntry {
-  rank: number;
-  entryId: string;
-  teamName: string;
-  purchaserName: string;
-  picks: Array<{ tierNumber: number; golferName: string; score: number | null; status: string }>;
-  totalScore: number | null;
-  tiebreakerScore: number | null;
-  paidStatus: string;
-}
+export async function GET(req: NextRequest) {
+  const yearParam = req.nextUrl.searchParams.get("year");
+  const year = yearParam ? parseInt(yearParam, 10) : 2026;
 
-async function buildLeaderboard(poolId: string): Promise<LeaderboardEntry[]> {
-  const entries = await prisma.entry.findMany({
-    where: { poolId },
-    include: {
-      picks: {
-        include: {
-          golfer: { select: { id: true, name: true } },
-          tier: { select: { tierNumber: true } },
-        },
-        orderBy: { tier: { tierNumber: "asc" } },
-      },
-    },
-  });
+  try {
+    const pool = await prisma.pool.findUnique({ where: { year } });
+    if (!pool) {
+      return NextResponse.json({ error: "Pool not found" }, { status: 404 });
+    }
 
-  const liveScores = await prisma.liveScore.findMany({
-    where: { poolId },
-    select: { golferId: true, totalScore: true, status: true },
-  });
+    const serverTimeIso = new Date().toISOString();
 
-  const scoreMap = new Map(liveScores.map((s) => [s.golferId, s]));
-
-  const rows = entries.map((entry) => {
-    const picks = entry.picks.map((p) => {
-      const ls = scoreMap.get(p.golferId);
-      return {
-        tierNumber: p.tier.tierNumber,
-        golferName: p.golfer.name,
-        score: ls?.totalScore ?? null,
-        status: String(ls?.status ?? "ACTIVE"),
-      };
+    // Try to serve from cache
+    const cache = await prisma.leaderboardCache.findUnique({
+      where: { poolId: pool.id },
     });
 
-    const validScores = picks.map((p) => p.score).filter((s): s is number => s !== null);
-    const totalScore = validScores.length > 0 ? validScores.reduce((a, b) => a + b, 0) : null;
+    if (cache) {
+      return NextResponse.json({
+        server_time_iso: serverTimeIso,
+        last_updated_iso: cache.updatedAt.toISOString(),
+        entries: cache.data,
+      });
+    }
 
-    return {
-      rank: 0,
+    // No cache yet — build a pre-tournament list (null scores) from DB
+    const entries = await prisma.entry.findMany({
+      where: { poolId: pool.id },
+      include: {
+        picks: {
+          include: {
+            golfer: { select: { name: true } },
+            tier: { select: { tierNumber: true } },
+          },
+          orderBy: { tier: { tierNumber: "asc" } },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const rows = entries.map((entry, i) => ({
+      rank: i + 1,
       entryId: entry.id,
       teamName: entry.teamName,
       purchaserName: entry.purchaserName,
-      picks,
-      totalScore,
+      totalScore: null,
       tiebreakerScore: entry.tiebreakerScore,
       paidStatus: entry.paidStatus,
-    };
-  });
+      isDead: entry.isDead,
+      createdAt: entry.createdAt.toISOString(),
+      picks: entry.picks.map((p) => ({
+        tierNumber: p.tier.tierNumber,
+        golferName: p.golfer.name,
+        score: null,
+        roundScores: [null, null, null, null],
+        status: "ACTIVE",
+        thru: null,
+      })),
+    }));
 
-  rows.sort((a, b) => {
-    if (a.totalScore === null && b.totalScore === null) return 0;
-    if (a.totalScore === null) return 1;
-    if (b.totalScore === null) return -1;
-    return a.totalScore - b.totalScore;
-  });
-  rows.forEach((r, i) => { r.rank = i + 1; });
-  return rows;
-}
-
-export async function GET() {
-  try {
-    const pool = await prisma.pool.findUnique({ where: { year: 2026 } });
-    if (!pool) return NextResponse.json({ error: "Pool not found" }, { status: 404 });
-
-    const cache = await prisma.leaderboardCache.findUnique({ where: { poolId: pool.id } });
-    if (cache && cache.expiresAt > new Date()) {
-      return NextResponse.json({ entries: cache.data, fromCache: true, cachedAt: cache.fetchedAt });
-    }
-
-    const entries = await buildLeaderboard(pool.id);
-    const expiresAt = new Date(Date.now() + 60_000);
-    const jsonData = JSON.parse(JSON.stringify(entries)) as Prisma.InputJsonValue;
-
-    await prisma.leaderboardCache.upsert({
-      where: { poolId: pool.id },
-      update: { data: jsonData, fetchedAt: new Date(), expiresAt },
-      create: { poolId: pool.id, data: jsonData, expiresAt },
+    return NextResponse.json({
+      server_time_iso: serverTimeIso,
+      last_updated_iso: null,
+      entries: rows,
     });
-
-    return NextResponse.json({ entries, fromCache: false });
   } catch (error) {
-    console.error("Leaderboard API error:", error);
-    return NextResponse.json({ error: "Failed to fetch leaderboard" }, { status: 500 });
+    console.error("Leaderboard GET error:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch leaderboard" },
+      { status: 500 }
+    );
   }
 }

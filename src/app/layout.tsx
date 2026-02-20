@@ -21,7 +21,7 @@ export default function RootLayout({
               <span className="text-[#FFCD00] text-lg font-semibold">2026</span>
             </div>
             <nav className="flex gap-6 text-sm font-medium">
-              <a href="/" className="hover:text-[#FFCD00] transition-colors">Leaderboard</a>
+              <a href="/leaderboard" className="hover:text-[#FFCD00] transition-colors">Leaderboard</a>
               <a href="/enter" className="hover:text-[#FFCD00] transition-colors">Enter</a>
               <a href="/golfers" className="hover:text-[#FFCD00] transition-colors">Field</a>
               <a href="/rules" className="hover:text-[#FFCD00] transition-colors">Rules</a>
