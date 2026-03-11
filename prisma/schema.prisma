@@ -1,0 +1,193 @@
+// Masters Pool 2026 — Prisma schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum PoolStatus {
+  PENDING
+  OPEN
+  IN_PROGRESS
+  COMPLETE
+}
+
+enum PaidStatus {
+  PENDING
+  PAID
+}
+
+enum GolferStatus {
+  ACTIVE
+  CUT
+  WD
+  DQ
+  COMPLETE
+}
+
+// ─── Pool ─────────────────────────────────────────────────────────────────────
+
+/// One row per tournament year (e.g. 2026).
+model Pool {
+  id                    String            @id @default(cuid())
+  year                  Int               @unique
+  name                  String
+  status                PoolStatus        @default(PENDING)
+  /// Submissions locked after this UTC instant (displayed in America/Chicago)
+  lockAtCt              DateTime?
+  venmoHandle           String?           // e.g. "MastersPool2026" (no @ prefix)
+  entryFeeUsd           Int               @default(20)
+  /// Sportradar tournament ID resolved from schedule endpoint
+  mastersTournamentId   String?
+  /// Round after which MC golfers are frozen (typically 2)
+  cutRound              Int?
+  /// Winner's final score relative to par (null until tournament complete)
+  winnerFinalScoreToPar Int?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  tiers            Tier[]
+  entries          Entry[]
+  liveScores       LiveScore[]
+  leaderboardCache LeaderboardCache?
+}
+
+// ─── Tiers ────────────────────────────────────────────────────────────────────
+
+/// Skill-based grouping within a pool. Tiers 1–6; entrants pick one golfer per tier.
+model Tier {
+  id           String       @id @default(cuid())
+  poolId       String
+  pool         Pool         @relation(fields: [poolId], references: [id])
+  tierNumber   Int          // 1 = elite … 6 = long shots
+  name         String       // e.g. "Tier 1 — Elite"
+  createdAt    DateTime     @default(now())
+
+  tierGolfers  TierGolfer[]
+  picks        Pick[]
+
+  @@unique([poolId, tierNumber])
+}
+
+// ─── Golfers ──────────────────────────────────────────────────────────────────
+
+/// Masters field; sportradarId used for server-side score lookups.
+model Golfer {
+  id           String   @id @default(cuid())
+  name         String
+  worldRank    Int?
+  sportradarId String?  @unique
+  createdAt    DateTime @default(now())
+
+  tierGolfers      TierGolfer[]
+  picks            Pick[]
+  substitutionsOut Substitution[] @relation("OldGolfer")
+  substitutionsIn  Substitution[] @relation("NewGolfer")
+  liveScores       LiveScore[]
+}
+
+// ─── TierGolfers ──────────────────────────────────────────────────────────────
+
+/// Assigns a golfer to a specific tier within a pool.
+model TierGolfer {
+  id        String   @id @default(cuid())
+  tierId    String
+  tier      Tier     @relation(fields: [tierId], references: [id])
+  golferId  String
+  golfer    Golfer   @relation(fields: [golferId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([tierId, golferId])
+}
+
+// ─── Entries ──────────────────────────────────────────────────────────────────
+
+/// One entry per participant per pool.
+model Entry {
+  id                  String     @id @default(cuid())
+  poolId              String
+  pool                Pool       @relation(fields: [poolId], references: [id])
+  purchaserName       String
+  email               String
+  teamName            String
+  tiebreakerScore     Int?       // predicted winning score under par (e.g. 18)
+  paidStatus          PaidStatus @default(PENDING)
+  /// True if any pick has WD/DQ status — sorted to bottom of leaderboard
+  isDead              Boolean    @default(false)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  picks         Pick[]
+  substitutions Substitution[]
+}
+
+// ─── Picks ────────────────────────────────────────────────────────────────────
+
+/// One pick per tier per entry — the selected golfer for that tier.
+model Pick {
+  id        String   @id @default(cuid())
+  entryId   String
+  entry     Entry    @relation(fields: [entryId], references: [id])
+  tierId    String
+  tier      Tier     @relation(fields: [tierId], references: [id])
+  golferId  String
+  golfer    Golfer   @relation(fields: [golferId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([entryId, tierId])    // one golfer per tier per entry
+  @@unique([entryId, golferId])  // no duplicate golfers per entry
+}
+
+// ─── Substitutions ────────────────────────────────────────────────────────────
+
+/// Tracks mid-tournament swaps (e.g. injury WD → replacement golfer).
+model Substitution {
+  id            String   @id @default(cuid())
+  entryId       String
+  entry         Entry    @relation(fields: [entryId], references: [id])
+  tierId        String
+  oldGolferId   String
+  oldGolfer     Golfer   @relation("OldGolfer", fields: [oldGolferId], references: [id])
+  newGolferId   String
+  newGolfer     Golfer   @relation("NewGolfer", fields: [newGolferId], references: [id])
+  reason        String?  // e.g. "WD - back injury"
+  substitutedAt DateTime @default(now())
+}
+
+// ─── LiveScores ───────────────────────────────────────────────────────────────
+
+/// Per-golfer score synced from Sportradar (server-side only).
+model LiveScore {
+  id          String       @id @default(cuid())
+  golferId    String
+  golfer      Golfer       @relation(fields: [golferId], references: [id])
+  poolId      String
+  pool        Pool         @relation(fields: [poolId], references: [id])
+  round       Int          // current round 1–4
+  totalScore  Int          // strokes relative to par (negative = under par)
+  thru        Int?         // holes completed in current round (null = not started)
+  status      GolferStatus @default(ACTIVE)
+  /// Per-round scores [r1, r2, r3, r4] relative to par; null = not yet played
+  roundScores Json?
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([golferId, poolId])
+}
+
+// ─── LeaderboardCache ─────────────────────────────────────────────────────────
+
+/// Computed pool leaderboard stored as JSON to avoid per-request DB aggregation.
+model LeaderboardCache {
+  id        String   @id @default(cuid())
+  poolId    String   @unique
+  pool      Pool     @relation(fields: [poolId], references: [id])
+  data      Json
+  updatedAt DateTime @updatedAt
+}
